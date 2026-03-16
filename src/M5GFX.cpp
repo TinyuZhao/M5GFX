@@ -2076,7 +2076,7 @@ The usage of each pin is as follows.
             auto bus_cfg = bus_dsi->config();
             bus_cfg.bus_id = 0;
             bus_cfg.lane_num = 2;
-            bus_cfg.lane_mbps = 960;
+            bus_cfg.lane_mbps = 1040;
             bus_cfg.ldo_chan_id = 3;
             bus_cfg.ldo_voltage_mv = 2500;
             bus_dsi->config(bus_cfg);
