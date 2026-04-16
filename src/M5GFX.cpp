@@ -1516,6 +1516,12 @@ namespace m5gfx
             lgfx::i2c::bitOff(I2C_NUM_1, m5pm1_i2c_addr, 0x13, 1 << 0, i2c_speed); // Set gpio0 push-pull mode: reg:0x13
             lgfx::i2c::bitOn(I2C_NUM_1, m5pm1_i2c_addr, 0x11, 1 << 0, i2c_speed);  // Set gpio0 output high: reg:0x05
 
+            // GPIO3: SD card power enable
+            lgfx::i2c::bitOff(I2C_NUM_1, m5pm1_i2c_addr, 0x16, 1 << 3, i2c_speed); // Set pin gpio3 as gpio function
+            lgfx::i2c::bitOn(I2C_NUM_1, m5pm1_i2c_addr, 0x10, 1 << 3, i2c_speed);  // Set pin gpio3 mode: output
+            lgfx::i2c::bitOff(I2C_NUM_1, m5pm1_i2c_addr, 0x13, 1 << 3, i2c_speed); // Set gpio3 push-pull mode: reg:0x13
+            lgfx::i2c::bitOn(I2C_NUM_1, m5pm1_i2c_addr, 0x11, 1 << 3, i2c_speed);  // Set gpio3 output high: reg:0x05
+
             // reg: 0x09(I2C_CFG) - Set to 0x00 to disable I2C idle sleep mode.
             // PMIC is always-on powered, and with battery power, shutdown doesn't reset the chip.
             // This register may have been modified elsewhere, causing PMIC communication issues.

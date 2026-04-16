@@ -12,8 +12,7 @@ Author:
 /----------------------------------------------------------------------------*/
 #pragma once
 
-#include "lgfx/v1/panel/Panel_HasBuffer.hpp"
-#include "lgfx/v1/misc/range.hpp"
+#include "lgfx/v1/panel/Panel_FrameBufferBase.hpp"
 
 namespace lgfx
 {
@@ -21,15 +20,15 @@ namespace lgfx
  {
 //----------------------------------------------------------------------------
 
-  struct Panel_EPD_ED2208 : public Panel_HasBuffer
+  struct Panel_EPD_ED2208 : public Panel_FrameBufferBase
   {
     Panel_EPD_ED2208(void);
+    ~Panel_EPD_ED2208(void);
 
     bool init(bool use_reset) override;
 
     color_depth_t setColorDepth(color_depth_t depth) override;
 
-    void setInvert(bool invert) override;
     void setSleep(bool flg) override;
     void setPowerSave(bool flg) override;
 
@@ -37,16 +36,7 @@ namespace lgfx
     bool displayBusy(void) override;
     void display(uint_fast16_t x, uint_fast16_t y, uint_fast16_t w, uint_fast16_t h) override;
 
-    void writeFillRectPreclipped(uint_fast16_t x, uint_fast16_t y, uint_fast16_t w, uint_fast16_t h, uint32_t rawcolor) override;
-    void writeImage(uint_fast16_t x, uint_fast16_t y, uint_fast16_t w, uint_fast16_t h, pixelcopy_t* param, bool use_dma) override;
-    void writePixels(pixelcopy_t* param, uint32_t len, bool use_dma) override;
-
-    uint32_t readCommand(uint_fast16_t, uint_fast8_t, uint_fast8_t) override { return 0; }
-    uint32_t readData(uint_fast8_t, uint_fast8_t) override { return 0; }
-
-    void readRect(uint_fast16_t x, uint_fast16_t y, uint_fast16_t w, uint_fast16_t h, void* dst, pixelcopy_t* param) override;
-
-    // EPD color indices
+    // EPD color indices (panel native 4bpp values)
     static constexpr uint8_t EPD_BLACK  = 0x0;
     static constexpr uint8_t EPD_WHITE  = 0x1;
     static constexpr uint8_t EPD_YELLOW = 0x2;
@@ -54,19 +44,18 @@ namespace lgfx
     static constexpr uint8_t EPD_BLUE   = 0x5;
     static constexpr uint8_t EPD_GREEN  = 0x6;
 
+    // Error diffusion ratio (16 = full FS, higher = more damping).
+    // 16: ratio 1.0 (standard FS)
+    // 19: ratio ~0.84 (recommended, reduces bleed)
+    void setDiffusionDivisor(uint8_t div) { _diffusion_div = div < 16 ? 16 : div; }
+    uint8_t getDiffusionDivisor(void) const { return _diffusion_div; }
+
   private:
 
-    static constexpr unsigned long _refresh_msec = 1000;
+    uint8_t _diffusion_div = 19;
+    uint8_t* _framebuffer = nullptr;
 
-    range_rect_t _range_old;
-    unsigned long _send_msec = 0;
-
-    size_t _get_buffer_length(void) const override;
-
-    bool _wait_busy(uint32_t timeout = 60000);
-    void _draw_pixel(uint_fast16_t x, uint_fast16_t y, uint32_t rawcolor);
-    uint8_t _read_pixel(uint_fast16_t x, uint_fast16_t y);
-    void _update_transferred_rect(uint_fast16_t &xs, uint_fast16_t &ys, uint_fast16_t &xe, uint_fast16_t &ye);
+    bool _wait_busy(uint32_t timeout = 20000);
     void _exec_transfer(void);
     void _turn_on_display(void);
     void _send_command(uint8_t cmd);
@@ -74,7 +63,16 @@ namespace lgfx
     void _init_sequence(void);
     void _after_wake(void);
 
+    void _dither_row_none(const bgr888_t* src, uint8_t* dst, uint_fast16_t y);
+    void _dither_row_bayer(const bgr888_t* src, uint8_t* dst, uint_fast16_t y);
+    void _dither_row_floyd(const bgr888_t* src, uint8_t* dst, uint_fast16_t w,
+                           int16_t* err_curr, int16_t* err_next, bool serpentine);
+    void _dither_row_spectra6(const bgr888_t* src, uint8_t* dst, uint_fast16_t w,
+                              float* err_curr, float* err_next, float* lab_row, bool serpentine);
+
     static uint8_t _rgb_to_epd_color(int32_t r, int32_t g, int32_t b);
+    static uint8_t _rgb_to_epd_color(int32_t r, int32_t g, int32_t b,
+                                     int32_t& er, int32_t& eg, int32_t& eb);
 
     const uint8_t* getInitCommands(uint8_t listno) const override
     {
