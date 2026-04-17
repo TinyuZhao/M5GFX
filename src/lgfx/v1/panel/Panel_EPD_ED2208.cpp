@@ -17,7 +17,6 @@ Author:
 #include "lgfx/v1/misc/colortype.hpp"
 
 #include <cmath>
-#include <cfloat>
 
 #ifdef min
 #undef min
@@ -29,8 +28,7 @@ namespace lgfx
  {
 //----------------------------------------------------------------------------
 
-  // --- Ideal RGB palette (for Bayer / none / floyd_steinberg) ---
-
+  // Ideal RGB palette for nearest-color lookup.
   static constexpr struct { uint8_t r, g, b, idx; } epd_palette[] = {
     {   0,   0,   0, Panel_EPD_ED2208::EPD_BLACK  },
     { 255, 255, 255, Panel_EPD_ED2208::EPD_WHITE  },
@@ -40,21 +38,7 @@ namespace lgfx
     {   0, 255,   0, Panel_EPD_ED2208::EPD_GREEN  },
   };
 
-  // --- Spectra6 Lab-space infrastructure ---
-  // Adjusted ideal palette for Lab-space dithering (converter.py fallback).
-  // Black/White are pure endpoints; chromatic colors are tuned for this panel.
-
-  static constexpr struct { uint8_t r, g, b, idx; } epd_palette_s6[] = {
-    {   0,   0,   0, Panel_EPD_ED2208::EPD_BLACK  },
-    { 255, 255, 255, Panel_EPD_ED2208::EPD_WHITE  },
-    { 255, 221,   0, Panel_EPD_ED2208::EPD_YELLOW },
-    { 206,  38,  54, Panel_EPD_ED2208::EPD_RED    },
-    {   0,  64, 255, Panel_EPD_ED2208::EPD_BLUE   },
-    {   0, 128,   0, Panel_EPD_ED2208::EPD_GREEN  },
-  };
-
-  // --- 16x16 Bayer matrix (shared by bayer and pair modes) ---
-
+  // 16x16 Bayer matrix, bias range [-127, 127].
   static constexpr int8_t bayer16[256] = {
     -127,    0, -95,   32,-119,   8, -87,  40,-125,   2, -93,  34,-117,  10, -85,  42,
       64,  -63,  96,  -31,  72, -55, 104, -23,  66, -61,  98, -29,  74, -53, 106, -21,
@@ -74,15 +58,26 @@ namespace lgfx
      127,    0,  95,  -32, 119,  -8,  87, -40, 125,  -2,  93, -34, 117, -10,  85, -42,
   };
 
-  // Pre-processing parameters from epd6color_adjust.json.
-  static constexpr float S6_CONTRAST   = 1.08f;   // 108 / 100
-  static constexpr float S6_SATURATION = 0.81f;    //  81 / 100
-  static constexpr float S6_GAMMA_EXP  = 1.8519f;  // 1.0 / (54 / 100)
+  // --- Lab conversion infrastructure ---
 
-  static float srgb_lut[256];
-  struct LabEntry { float L, a, b; uint8_t idx; };
-  static LabEntry lab_palette[6];
-  static bool s6_initialized = false;
+  static constexpr float srgb_lut[256] = {
+    0.0000000f, 0.0003035f, 0.0006071f, 0.0009106f, 0.0012141f, 0.0015176f, 0.0018212f, 0.0021247f, 0.0024282f, 0.0027317f, 0.0030353f, 0.0033465f, 0.0036765f, 0.0040247f, 0.0043914f, 0.0047770f,
+    0.0051815f, 0.0056054f, 0.0060488f, 0.0065121f, 0.0069954f, 0.0074990f, 0.0080232f, 0.0085681f, 0.0091341f, 0.0097212f, 0.0103298f, 0.0109601f, 0.0116122f, 0.0122865f, 0.0129830f, 0.0137021f,
+    0.0144438f, 0.0152085f, 0.0159963f, 0.0168074f, 0.0176420f, 0.0185002f, 0.0193824f, 0.0202886f, 0.0212190f, 0.0221739f, 0.0231534f, 0.0241576f, 0.0251869f, 0.0262412f, 0.0273209f, 0.0284260f,
+    0.0295568f, 0.0307134f, 0.0318960f, 0.0331048f, 0.0343398f, 0.0356013f, 0.0368895f, 0.0382044f, 0.0395462f, 0.0409152f, 0.0423114f, 0.0437350f, 0.0451862f, 0.0466651f, 0.0481718f, 0.0497066f,
+    0.0512695f, 0.0528606f, 0.0544803f, 0.0561285f, 0.0578054f, 0.0595112f, 0.0612461f, 0.0630100f, 0.0648033f, 0.0666259f, 0.0684782f, 0.0703601f, 0.0722719f, 0.0742136f, 0.0761854f, 0.0781874f,
+    0.0802198f, 0.0822827f, 0.0843762f, 0.0865005f, 0.0886556f, 0.0908417f, 0.0930590f, 0.0953075f, 0.0975873f, 0.0998987f, 0.1022417f, 0.1046165f, 0.1070231f, 0.1094617f, 0.1119324f, 0.1144354f,
+    0.1169707f, 0.1195384f, 0.1221388f, 0.1247718f, 0.1274377f, 0.1301365f, 0.1328683f, 0.1356333f, 0.1384316f, 0.1412633f, 0.1441285f, 0.1470273f, 0.1499598f, 0.1529262f, 0.1559265f, 0.1589608f,
+    0.1620294f, 0.1651322f, 0.1682694f, 0.1714411f, 0.1746474f, 0.1778884f, 0.1811642f, 0.1844750f, 0.1878208f, 0.1912017f, 0.1946178f, 0.1980693f, 0.2015563f, 0.2050787f, 0.2086369f, 0.2122308f,
+    0.2158605f, 0.2195262f, 0.2232280f, 0.2269659f, 0.2307400f, 0.2345506f, 0.2383976f, 0.2422811f, 0.2462013f, 0.2501583f, 0.2541521f, 0.2581829f, 0.2622507f, 0.2663556f, 0.2704978f, 0.2746773f,
+    0.2788943f, 0.2831487f, 0.2874408f, 0.2917706f, 0.2961383f, 0.3005438f, 0.3049873f, 0.3094689f, 0.3139887f, 0.3185468f, 0.3231432f, 0.3277781f, 0.3324515f, 0.3371636f, 0.3419144f, 0.3467041f,
+    0.3515326f, 0.3564001f, 0.3613068f, 0.3662526f, 0.3712377f, 0.3762621f, 0.3813260f, 0.3864294f, 0.3915725f, 0.3967552f, 0.4019778f, 0.4072402f, 0.4125426f, 0.4178851f, 0.4232677f, 0.4286905f,
+    0.4341536f, 0.4396572f, 0.4452012f, 0.4507858f, 0.4564110f, 0.4620770f, 0.4677838f, 0.4735315f, 0.4793202f, 0.4851499f, 0.4910208f, 0.4969330f, 0.5028865f, 0.5088813f, 0.5149177f, 0.5209956f,
+    0.5271151f, 0.5332764f, 0.5394795f, 0.5457245f, 0.5520114f, 0.5583404f, 0.5647115f, 0.5711248f, 0.5775804f, 0.5840784f, 0.5906188f, 0.5972018f, 0.6038273f, 0.6104956f, 0.6172066f, 0.6239604f,
+    0.6307571f, 0.6375969f, 0.6444797f, 0.6514056f, 0.6583748f, 0.6653873f, 0.6724432f, 0.6795425f, 0.6866853f, 0.6938718f, 0.7011019f, 0.7083758f, 0.7156935f, 0.7230551f, 0.7304607f, 0.7379104f,
+    0.7454042f, 0.7529422f, 0.7605245f, 0.7681511f, 0.7758222f, 0.7835378f, 0.7912979f, 0.7991027f, 0.8069523f, 0.8148466f, 0.8227858f, 0.8307699f, 0.8387990f, 0.8468732f, 0.8549926f, 0.8631572f,
+    0.8713671f, 0.8796224f, 0.8879231f, 0.8962694f, 0.9046612f, 0.9130987f, 0.9215819f, 0.9301109f, 0.9386857f, 0.9473065f, 0.9559734f, 0.9646862f, 0.9734453f, 0.9822506f, 0.9911021f, 1.0000000f,
+  };
 
   static inline void rgb_to_lab(uint8_t r, uint8_t g, uint8_t b,
                                 float& out_L, float& out_a, float& out_b)
@@ -105,84 +100,40 @@ namespace lgfx
     out_b = 200.0f * (fY - fZ);
   }
 
-  static void init_spectra6_tables()
+  static inline void lab_to_rgb(float L, float a, float b,
+                                int32_t& out_r, int32_t& out_g, int32_t& out_b)
   {
-    if (s6_initialized) return;
+    float fy = (L + 16.0f) / 116.0f;
+    float fx = a / 500.0f + fy;
+    float fz = fy - b / 200.0f;
 
-    for (int i = 0; i < 256; ++i) {
-      float c = i / 255.0f;
-      srgb_lut[i] = (c <= 0.04045f) ? c / 12.92f : powf((c + 0.055f) / 1.055f, 2.4f);
-    }
+    auto f_inv = [](float t) -> float {
+      return (t > 0.206893f) ? t * t * t : (t - 0.137931f) / 7.787037f;
+    };
 
-    for (int i = 0; i < 6; ++i) {
-      auto& p = epd_palette_s6[i];
-      rgb_to_lab(p.r, p.g, p.b, lab_palette[i].L, lab_palette[i].a, lab_palette[i].b);
-      lab_palette[i].idx = p.idx;
-    }
+    float X = f_inv(fx) * 0.95047f;
+    float Y = f_inv(fy);
+    float Z = f_inv(fz) * 1.08883f;
 
-    s6_initialized = true;
+    float R =  3.2404542f * X - 1.5371385f * Y - 0.4985314f * Z;
+    float G = -0.9692660f * X + 1.8760108f * Y + 0.0415560f * Z;
+    float B =  0.0556434f * X - 0.2040259f * Y + 1.0572252f * Z;
+
+    auto to_srgb = [](float c) -> float {
+      return (c <= 0.0031308f) ? 12.92f * c : 1.055f * powf(c, 1.0f / 2.4f) - 0.055f;
+    };
+
+    out_r = (int32_t)(to_srgb(R) * 255.0f + 0.5f);
+    out_g = (int32_t)(to_srgb(G) * 255.0f + 0.5f);
+    out_b = (int32_t)(to_srgb(B) * 255.0f + 0.5f);
   }
 
-  // Apply contrast → saturation(HSV) → gamma, matching the Python converter.
-  static inline void preprocess_pixel(uint8_t r_in, uint8_t g_in, uint8_t b_in,
-                                      uint8_t& r_out, uint8_t& g_out, uint8_t& b_out)
+  // Interleaved Gradient Noise (Jorge Jimenez, 2014).
+  // Non-periodic 2D noise, blue-noise-like distribution.
+  static inline float ign(uint_fast16_t x, uint_fast16_t y)
   {
-    // Contrast (then quantize to uint8 as Python does)
-    float rf = r_in * S6_CONTRAST;
-    float gf = g_in * S6_CONTRAST;
-    float bf = b_in * S6_CONTRAST;
-    if (rf > 255.0f) rf = 255.0f;
-    if (gf > 255.0f) gf = 255.0f;
-    if (bf > 255.0f) bf = 255.0f;
-    uint8_t r8 = (uint8_t)(rf + 0.5f);
-    uint8_t g8 = (uint8_t)(gf + 0.5f);
-    uint8_t b8 = (uint8_t)(bf + 0.5f);
-
-    // Saturation via HSV (matching OpenCV BGR2HSV / HSV2BGR at uint8 precision)
-    // RGB→HSV
-    uint8_t max_c = r8 > g8 ? (r8 > b8 ? r8 : b8) : (g8 > b8 ? g8 : b8);
-    uint8_t min_c = r8 < g8 ? (r8 < b8 ? r8 : b8) : (g8 < b8 ? g8 : b8);
-    uint8_t delta = max_c - min_c;
-    uint8_t v = max_c;
-    uint8_t s = (v == 0) ? 0 : (uint8_t)((int)delta * 255 / (int)v);
-    int h = 0;
-    if (delta > 0) {
-      if (max_c == r8)      h = 30 * (int)(g8 - b8) / (int)delta;
-      else if (max_c == g8) h = 60 + 30 * (int)(b8 - r8) / (int)delta;
-      else                  h = 120 + 30 * (int)(r8 - g8) / (int)delta;
-      if (h < 0) h += 180;
-    }
-
-    // Scale S
-    s = (uint8_t)(s * S6_SATURATION + 0.5f);
-
-    // HSV→RGB (OpenCV-style, H:0-180, S:0-255, V:0-255)
-    if (s == 0) {
-      r8 = g8 = b8 = v;
-    } else {
-      int sector = h / 30;
-      int f_int  = h - sector * 30;
-      uint8_t p = (uint8_t)((int)v * (255 - (int)s) / 255);
-      uint8_t q = (uint8_t)((int)v * (255 - (int)s * f_int / 30) / 255);
-      uint8_t t = (uint8_t)((int)v * (255 - (int)s * (30 - f_int) / 30) / 255);
-      switch (sector % 6) {
-        case 0: r8 = v; g8 = t; b8 = p; break;
-        case 1: r8 = q; g8 = v; b8 = p; break;
-        case 2: r8 = p; g8 = v; b8 = t; break;
-        case 3: r8 = p; g8 = q; b8 = v; break;
-        case 4: r8 = t; g8 = p; b8 = v; break;
-        case 5: r8 = v; g8 = p; b8 = q; break;
-      }
-    }
-
-    // Gamma
-    rf = powf(r8 / 255.0f, S6_GAMMA_EXP) * 255.0f;
-    gf = powf(g8 / 255.0f, S6_GAMMA_EXP) * 255.0f;
-    bf = powf(b8 / 255.0f, S6_GAMMA_EXP) * 255.0f;
-
-    r_out = (uint8_t)(rf + 0.5f);
-    g_out = (uint8_t)(gf + 0.5f);
-    b_out = (uint8_t)(bf + 0.5f);
+    float f = 52.9829189f * fmodf(0.06711056f * x + 0.00583715f * y, 1.0f);
+    return f - (int)f;
   }
 
   // --- Panel implementation ---
@@ -227,29 +178,6 @@ namespace lgfx
         best = p.idx;
       }
     }
-    return best;
-  }
-
-  uint8_t Panel_EPD_ED2208::_rgb_to_epd_color(int32_t r, int32_t g, int32_t b,
-                                              int32_t& er, int32_t& eg, int32_t& eb)
-  {
-    uint32_t min_dist = UINT32_MAX;
-    uint8_t best = EPD_WHITE;
-    int32_t best_r = 255, best_g = 255, best_b = 255;
-    for (const auto& p : epd_palette) {
-      int32_t dr = r - (int32_t)p.r;
-      int32_t dg = g - (int32_t)p.g;
-      int32_t db = b - (int32_t)p.b;
-      uint32_t dist = dr * dr + dg * dg + db * db;
-      if (dist < min_dist) {
-        min_dist = dist;
-        best = p.idx;
-        best_r = p.r; best_g = p.g; best_b = p.b;
-      }
-    }
-    er = r - best_r;
-    eg = g - best_g;
-    eb = b - best_b;
     return best;
   }
 
@@ -359,8 +287,6 @@ namespace lgfx
 
     memset(_framebuffer, 0xFF, bytes_per_line * ph);
 
-    init_spectra6_tables();
-
     if (!Panel_FrameBufferBase::init(false))
     {
       return false;
@@ -413,11 +339,10 @@ namespace lgfx
     }
   }
 
-  // --- Dither: none ---
+  // --- Dither: none (nearest-color only) ---
 
-  void Panel_EPD_ED2208::_dither_row_none(const bgr888_t* src, uint8_t* dst, uint_fast16_t /*y*/)
+  void Panel_EPD_ED2208::_dither_row_none(const bgr888_t* src, uint8_t* dst, uint_fast16_t w, uint_fast16_t /*y*/)
   {
-    uint_fast16_t w = _cfg.panel_width;
     for (uint_fast16_t x = 0; x < w; x += 2) {
       uint8_t c0 = _rgb_to_epd_color(src[x].r, src[x].g, src[x].b);
       uint8_t c1 = EPD_WHITE;
@@ -428,12 +353,11 @@ namespace lgfx
     }
   }
 
-  // --- Dither: Bayer 16x16 ---
+  // --- Dither: Bayer RGB (uniform bias on all channels) ---
 
-  void Panel_EPD_ED2208::_dither_row_bayer(const bgr888_t* src, uint8_t* dst, uint_fast16_t y)
+  void Panel_EPD_ED2208::_dither_row_bayer(const bgr888_t* src, uint8_t* dst, uint_fast16_t w, uint_fast16_t y)
   {
     auto row_b = &bayer16[(y & 15) << 4];
-    uint_fast16_t w = _cfg.panel_width;
     for (uint_fast16_t x = 0; x < w; x += 2) {
       int32_t bias0 = (int32_t)row_b[x & 15];
       uint8_t c0 = _rgb_to_epd_color((int32_t)src[x].r + bias0,
@@ -450,122 +374,89 @@ namespace lgfx
     }
   }
 
+  // --- Dither: Bayer HSV (V-only bias, preserves saturation) ---
 
-  // --- Dither: Floyd-Steinberg (RGB space, ideal palette, serpentine) ---
-
-  void Panel_EPD_ED2208::_dither_row_floyd(const bgr888_t* src, uint8_t* dst, uint_fast16_t w,
-                                           int16_t* err_curr, int16_t* err_next, bool serpentine)
+  static inline void hsv_bias_pixel(uint8_t r_in, uint8_t g_in, uint8_t b_in,
+                                    int32_t bias, int32_t& r_out, int32_t& g_out, int32_t& b_out)
   {
-    memset(err_next, 0, w * 3 * sizeof(int16_t));
+    uint8_t max_c = r_in > g_in ? (r_in > b_in ? r_in : b_in) : (g_in > b_in ? g_in : b_in);
+    uint8_t min_c = r_in < g_in ? (r_in < b_in ? r_in : b_in) : (g_in < b_in ? g_in : b_in);
+    int v = max_c;
+    int delta = max_c - min_c;
+    int new_v = v + bias;
 
-    uint8_t* idx_buf = static_cast<uint8_t*>(alloca(w));
-
-    int x_start = serpentine ? (int)w - 1 : 0;
-    int x_end   = serpentine ? -1 : (int)w;
-    int x_step  = serpentine ? -1 : 1;
-    for (int x = x_start; x != x_end; x += x_step) {
-      int32_t r = (int32_t)src[x].r + err_curr[x * 3 + 0];
-      int32_t g = (int32_t)src[x].g + err_curr[x * 3 + 1];
-      int32_t b = (int32_t)src[x].b + err_curr[x * 3 + 2];
-
-      if (r < 0) r = 0; else if (r > 255) r = 255;
-      if (g < 0) g = 0; else if (g > 255) g = 255;
-      if (b < 0) b = 0; else if (b > 255) b = 255;
-
-      int32_t er, eg, eb;
-      idx_buf[x] = _rgb_to_epd_color(r, g, b, er, eg, eb);
-
-      auto distribute = [&](int dx, int dy, int num) {
-        int nx = x + dx;
-        if (nx < 0 || nx >= (int)w) return;
-        int16_t* row = (dy == 0) ? err_curr : err_next;
-        row[nx * 3 + 0] += (int16_t)(er * num / _diffusion_div);
-        row[nx * 3 + 1] += (int16_t)(eg * num / _diffusion_div);
-        row[nx * 3 + 2] += (int16_t)(eb * num / _diffusion_div);
-      };
-
-      distribute( 1, 0, 7);
-      distribute(-1, 1, 3);
-      distribute( 0, 1, 5);
-      distribute( 1, 1, 1);
-    }
-
-    for (uint_fast16_t x = 0; x < w; x += 2) {
-      uint8_t hi = idx_buf[x];
-      uint8_t lo = (x + 1 < w) ? idx_buf[x + 1] : EPD_WHITE;
-      dst[x >> 1] = (hi << 4) | lo;
+    if (v == 0 || delta == 0) {
+      r_out = g_out = b_out = new_v;
+    } else {
+      r_out = (int)r_in * new_v / v;
+      g_out = (int)g_in * new_v / v;
+      b_out = (int)b_in * new_v / v;
     }
   }
 
-  // --- Dither: Spectra6 (Lab space, measured palette, pre-processing, serpentine) ---
-
-  void Panel_EPD_ED2208::_dither_row_spectra6(const bgr888_t* src, uint8_t* dst, uint_fast16_t w,
-                                              float* err_curr, float* err_next, float* lab_row,
-                                              bool serpentine)
+  void Panel_EPD_ED2208::_dither_row_bayer_hsv(const bgr888_t* src, uint8_t* dst, uint_fast16_t w, uint_fast16_t y)
   {
-    // Pre-process + convert to Lab
-    for (uint_fast16_t x = 0; x < w; ++x) {
-      uint8_t pr, pg, pb;
-      preprocess_pixel(src[x].r, src[x].g, src[x].b, pr, pg, pb);
-      rgb_to_lab(pr, pg, pb, lab_row[x * 3], lab_row[x * 3 + 1], lab_row[x * 3 + 2]);
-    }
-
-    memset(err_next, 0, w * 3 * sizeof(float));
-
-    uint8_t* idx_buf = static_cast<uint8_t*>(alloca(w));
-
-    // Python reference uses fixed FS kernel without mirroring on serpentine rows.
-    // On reverse-scan rows, the (1,0) 7/16 distribution goes to an already-
-    // processed pixel and is effectively discarded, providing ~44% implicit
-    // error damping that prevents Lab-space error runaway.
-    int x_start = serpentine ? (int)w - 1 : 0;
-    int x_end   = serpentine ? -1 : (int)w;
-    int x_step  = serpentine ? -1 : 1;
-
-    for (int x = x_start; x != x_end; x += x_step) {
-      float L = lab_row[x * 3 + 0] + err_curr[x * 3 + 0];
-      float a = lab_row[x * 3 + 1] + err_curr[x * 3 + 1];
-      float b = lab_row[x * 3 + 2] + err_curr[x * 3 + 2];
-
-      float min_dist = FLT_MAX;
-      int best = 0;
-      for (int i = 0; i < 6; ++i) {
-        float dL = L - lab_palette[i].L;
-        float da = a - lab_palette[i].a;
-        float db = b - lab_palette[i].b;
-        float dist = dL * dL + da * da + db * db;
-        if (dist < min_dist) {
-          min_dist = dist;
-          best = i;
-        }
-      }
-
-      idx_buf[x] = lab_palette[best].idx;
-
-      float eL = L - lab_palette[best].L;
-      float ea = a - lab_palette[best].a;
-      float eb = b - lab_palette[best].b;
-
-      auto distribute = [&](int dx, int dy, float weight) {
-        int nx = x + dx;
-        if (nx < 0 || nx >= (int)w) return;
-        float* row = (dy == 0) ? err_curr : err_next;
-        row[nx * 3 + 0] += eL * weight;
-        row[nx * 3 + 1] += ea * weight;
-        row[nx * 3 + 2] += eb * weight;
-      };
-
-      float div = (float)_diffusion_div;
-      distribute( 1, 0, 7.0f / div);
-      distribute(-1, 1, 3.0f / div);
-      distribute( 0, 1, 5.0f / div);
-      distribute( 1, 1, 1.0f / div);
-    }
-
+    auto row_b = &bayer16[(y & 15) << 4];
     for (uint_fast16_t x = 0; x < w; x += 2) {
-      uint8_t hi = idx_buf[x];
-      uint8_t lo = (x + 1 < w) ? idx_buf[x + 1] : EPD_WHITE;
-      dst[x >> 1] = (hi << 4) | lo;
+      int32_t r0, g0, b0;
+      hsv_bias_pixel(src[x].r, src[x].g, src[x].b, (int32_t)row_b[x & 15], r0, g0, b0);
+      uint8_t c0 = _rgb_to_epd_color(r0, g0, b0);
+
+      uint8_t c1 = EPD_WHITE;
+      if (x + 1 < w) {
+        int32_t r1, g1, b1;
+        hsv_bias_pixel(src[x+1].r, src[x+1].g, src[x+1].b, (int32_t)row_b[(x+1) & 15], r1, g1, b1);
+        c1 = _rgb_to_epd_color(r1, g1, b1);
+      }
+      dst[x >> 1] = (c0 << 4) | c1;
+    }
+  }
+
+  // --- Dither: Bayer Lab (L*-only bias, perceptually uniform) ---
+
+  void Panel_EPD_ED2208::_dither_row_bayer_lab(const bgr888_t* src, uint8_t* dst, uint_fast16_t w, uint_fast16_t y)
+  {
+    auto row_b = &bayer16[(y & 15) << 4];
+    for (uint_fast16_t x = 0; x < w; x += 2) {
+      float L, a, b;
+      int32_t r0, g0, b0;
+      rgb_to_lab(src[x].r, src[x].g, src[x].b, L, a, b);
+      L += ((float)row_b[x & 15]) / 4.0f;
+      lab_to_rgb(L, a, b, r0, g0, b0);
+      uint8_t c0 = _rgb_to_epd_color(r0, g0, b0);
+
+      uint8_t c1 = EPD_WHITE;
+      if (x + 1 < w) {
+        rgb_to_lab(src[x + 1].r, src[x + 1].g, src[x + 1].b, L, a, b);
+        L += ((float)row_b[(x + 1) & 15]) / 4.0f;
+        int32_t r1, g1, b1;
+        lab_to_rgb(L, a, b, r1, g1, b1);
+        c1 = _rgb_to_epd_color(r1, g1, b1);
+      }
+      dst[x >> 1] = (c0 << 4) | c1;
+    }
+  }
+
+  // --- Dither: IGN Lab (L*-only bias via Interleaved Gradient Noise) ---
+
+  void Panel_EPD_ED2208::_dither_row_ign_lab(const bgr888_t* src, uint8_t* dst, uint_fast16_t w, uint_fast16_t y)
+  {
+    for (uint_fast16_t x = 0; x < w; x += 2) {
+      float L, a, b;
+      int32_t r0, g0, b0;
+      rgb_to_lab(src[x].r, src[x].g, src[x].b, L, a, b);
+      L += (ign(x, y) - 0.5f) * 64.0f;
+      lab_to_rgb(L, a, b, r0, g0, b0);
+      uint8_t c0 = _rgb_to_epd_color(r0, g0, b0);
+      uint8_t c1 = EPD_WHITE;
+      if (x + 1 < w) {
+        rgb_to_lab(src[x + 1].r, src[x + 1].g, src[x + 1].b, L, a, b);
+        L += (ign(x + 1, y) - 0.5f) * 64.0f;
+        int32_t r1, g1, b1;
+        lab_to_rgb(L, a, b, r1, g1, b1);
+        c1 = _rgb_to_epd_color(r1, g1, b1);
+      }
+      dst[x >> 1] = (c0 << 4) | c1;
     }
   }
 
@@ -581,28 +472,12 @@ namespace lgfx
     row_buf[0] = static_cast<uint8_t*>(heap_alloc_dma(row_bytes));
     row_buf[1] = static_cast<uint8_t*>(heap_alloc_dma(row_bytes));
 
-    // FS (RGB) error buffers
-    int16_t* fs_err_a = nullptr;
-    int16_t* fs_err_b = nullptr;
-    // Spectra6 (Lab) error + conversion buffers
-    float* s6_err_a = nullptr;
-    float* s6_err_b = nullptr;
-    float* s6_lab   = nullptr;
-
-    size_t ch3 = (size_t)w * 3;
-
-    if (_epd_mode == epd_mode_t::epd_text) {
-      fs_err_a = static_cast<int16_t*>(heap_alloc(ch3 * sizeof(int16_t)));
-      fs_err_b = static_cast<int16_t*>(heap_alloc(ch3 * sizeof(int16_t)));
-      if (fs_err_a) memset(fs_err_a, 0, ch3 * sizeof(int16_t));
-      if (fs_err_b) memset(fs_err_b, 0, ch3 * sizeof(int16_t));
-    }
-    else if (_epd_mode == epd_mode_t::epd_quality) {
-      s6_err_a = static_cast<float*>(heap_alloc(ch3 * sizeof(float)));
-      s6_err_b = static_cast<float*>(heap_alloc(ch3 * sizeof(float)));
-      s6_lab   = static_cast<float*>(heap_alloc(ch3 * sizeof(float)));
-      if (s6_err_a) memset(s6_err_a, 0, ch3 * sizeof(float));
-      if (s6_err_b) memset(s6_err_b, 0, ch3 * sizeof(float));
+    dither_fn_t dither_fn;
+    switch (_epd_mode) {
+      case epd_mode_t::epd_fastest: dither_fn = _dither_row_bayer;     break;
+      case epd_mode_t::epd_fast:    dither_fn = _dither_row_bayer_hsv; break;
+      case epd_mode_t::epd_text:    dither_fn = _dither_row_bayer_lab; break;
+      default:                      dither_fn = _dither_row_ign_lab;   break;
     }
 
     _bus->beginTransaction();
@@ -610,40 +485,10 @@ namespace lgfx
 
     _send_command(0x10);    // Data start transmission
 
-    bool serpentine = false;
     for (uint_fast16_t y = 0; y < h; ++y) {
       uint8_t* dst = row_buf[y & 1];
       const bgr888_t* src = reinterpret_cast<const bgr888_t*>(_lines_buffer[y]);
-
-      switch (_epd_mode) {
-        case epd_mode_t::epd_fastest:
-          _dither_row_none(src, dst, y);
-          break;
-        case epd_mode_t::epd_fast:
-          _dither_row_bayer(src, dst, y);
-          break;
-        case epd_mode_t::epd_text:
-          if (fs_err_a && fs_err_b) {
-            int16_t* curr = (y & 1) ? fs_err_b : fs_err_a;
-            int16_t* next = (y & 1) ? fs_err_a : fs_err_b;
-            _dither_row_floyd(src, dst, w, curr, next, serpentine);
-            serpentine = !serpentine;
-          } else {
-            _dither_row_bayer(src, dst, y);
-          }
-          break;
-        case epd_mode_t::epd_quality:
-          if (s6_err_a && s6_err_b && s6_lab) {
-            float* curr = (y & 1) ? s6_err_b : s6_err_a;
-            float* next = (y & 1) ? s6_err_a : s6_err_b;
-            _dither_row_spectra6(src, dst, w, curr, next, s6_lab, serpentine);
-            serpentine = !serpentine;
-          } else {
-            _dither_row_bayer(src, dst, y);
-          }
-          break;
-      }
-
+      dither_fn(src, dst, w, y);
       _bus->writeBytes(dst, row_bytes, true, true);
     }
     _bus->wait();
@@ -653,11 +498,6 @@ namespace lgfx
 
     if (row_buf[0]) heap_free(row_buf[0]);
     if (row_buf[1]) heap_free(row_buf[1]);
-    if (fs_err_a) heap_free(fs_err_a);
-    if (fs_err_b) heap_free(fs_err_b);
-    if (s6_err_a) heap_free(s6_err_a);
-    if (s6_err_b) heap_free(s6_err_b);
-    if (s6_lab)   heap_free(s6_lab);
   }
 
   void Panel_EPD_ED2208::setSleep(bool flg)

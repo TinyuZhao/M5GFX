@@ -44,15 +44,14 @@ namespace lgfx
     static constexpr uint8_t EPD_BLUE   = 0x5;
     static constexpr uint8_t EPD_GREEN  = 0x6;
 
-    // Error diffusion ratio (16 = full FS, higher = more damping).
-    // 16: ratio 1.0 (standard FS)
-    // 19: ratio ~0.84 (recommended, reduces bleed)
-    void setDiffusionDivisor(uint8_t div) { _diffusion_div = div < 16 ? 16 : div; }
-    uint8_t getDiffusionDivisor(void) const { return _diffusion_div; }
+    // epd_mode mapping:
+    //   epd_fastest : Bayer RGB (fast, slight desaturation)
+    //   epd_fast    : Bayer HSV (V-only bias, preserves saturation)
+    //   epd_text    : Bayer Lab (L*-only bias, perceptually uniform)
+    //   epd_quality : IGN Lab  (non-periodic noise, best quality)
 
   private:
 
-    uint8_t _diffusion_div = 19;
     uint8_t* _framebuffer = nullptr;
 
     bool _wait_busy(uint32_t timeout = 20000);
@@ -63,16 +62,15 @@ namespace lgfx
     void _init_sequence(void);
     void _after_wake(void);
 
-    void _dither_row_none(const bgr888_t* src, uint8_t* dst, uint_fast16_t y);
-    void _dither_row_bayer(const bgr888_t* src, uint8_t* dst, uint_fast16_t y);
-    void _dither_row_floyd(const bgr888_t* src, uint8_t* dst, uint_fast16_t w,
-                           int16_t* err_curr, int16_t* err_next, bool serpentine);
-    void _dither_row_spectra6(const bgr888_t* src, uint8_t* dst, uint_fast16_t w,
-                              float* err_curr, float* err_next, float* lab_row, bool serpentine);
+    typedef void (*dither_fn_t)(const bgr888_t* src, uint8_t* dst, uint_fast16_t w, uint_fast16_t y);
+
+    static void _dither_row_none(const bgr888_t* src, uint8_t* dst, uint_fast16_t w, uint_fast16_t y);
+    static void _dither_row_bayer(const bgr888_t* src, uint8_t* dst, uint_fast16_t w, uint_fast16_t y);
+    static void _dither_row_bayer_hsv(const bgr888_t* src, uint8_t* dst, uint_fast16_t w, uint_fast16_t y);
+    static void _dither_row_bayer_lab(const bgr888_t* src, uint8_t* dst, uint_fast16_t w, uint_fast16_t y);
+    static void _dither_row_ign_lab(const bgr888_t* src, uint8_t* dst, uint_fast16_t w, uint_fast16_t y);
 
     static uint8_t _rgb_to_epd_color(int32_t r, int32_t g, int32_t b);
-    static uint8_t _rgb_to_epd_color(int32_t r, int32_t g, int32_t b,
-                                     int32_t& er, int32_t& eg, int32_t& eb);
 
     const uint8_t* getInitCommands(uint8_t listno) const override
     {
