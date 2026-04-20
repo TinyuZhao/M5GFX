@@ -36,20 +36,6 @@ namespace lgfx
     bool displayBusy(void) override;
     void display(uint_fast16_t x, uint_fast16_t y, uint_fast16_t w, uint_fast16_t h) override;
 
-    // EPD color indices (panel native 4bpp values)
-    static constexpr uint8_t EPD_BLACK  = 0x0;
-    static constexpr uint8_t EPD_WHITE  = 0x1;
-    static constexpr uint8_t EPD_YELLOW = 0x2;
-    static constexpr uint8_t EPD_RED    = 0x3;
-    static constexpr uint8_t EPD_BLUE   = 0x5;
-    static constexpr uint8_t EPD_GREEN  = 0x6;
-
-    // epd_mode mapping:
-    //   epd_fastest : Bayer RGB (fast, slight desaturation)
-    //   epd_fast    : Bayer HSV (V-only bias, preserves saturation)
-    //   epd_text    : Bayer Lab (L*-only bias, perceptually uniform)
-    //   epd_quality : IGN Lab  (non-periodic noise, best quality)
-
   private:
 
     uint8_t* _framebuffer = nullptr;
@@ -61,16 +47,6 @@ namespace lgfx
     void _send_data(uint8_t data);
     void _init_sequence(void);
     void _after_wake(void);
-
-    typedef void (*dither_fn_t)(const bgr888_t* src, uint8_t* dst, uint_fast16_t w, uint_fast16_t y);
-
-    static void _dither_row_none(const bgr888_t* src, uint8_t* dst, uint_fast16_t w, uint_fast16_t y);
-    static void _dither_row_bayer(const bgr888_t* src, uint8_t* dst, uint_fast16_t w, uint_fast16_t y);
-    static void _dither_row_bayer_hsv(const bgr888_t* src, uint8_t* dst, uint_fast16_t w, uint_fast16_t y);
-    static void _dither_row_bayer_lab(const bgr888_t* src, uint8_t* dst, uint_fast16_t w, uint_fast16_t y);
-    static void _dither_row_ign_lab(const bgr888_t* src, uint8_t* dst, uint_fast16_t w, uint_fast16_t y);
-
-    static uint8_t _rgb_to_epd_color(int32_t r, int32_t g, int32_t b);
 
     const uint8_t* getInitCommands(uint8_t listno) const override
     {
