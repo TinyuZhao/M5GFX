@@ -205,7 +205,7 @@ namespace lgfx
 
     int32_t bias_base = y * y_step % step_value;
     // Original scale was /4.0f; keep that at dither_level=255 and scale down linearly.
-    int32_t r0, g0, b0;
+    int32_t r0 = 0, g0 = 0, b0 = 0;
     for (uint_fast16_t x = 0; x <= w; x ++) {
       int32_t r = 128;
       int32_t g = 128;
